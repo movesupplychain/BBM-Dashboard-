@@ -7752,18 +7752,94 @@ function _filterRows(data){
   const q=reportsState.search.trim().toLowerCase();
   if(q) rows=rows.filter(r=>r.text.join(' ').toLowerCase().includes(q));
   const cf=reportsState.colFilters;
-  const active=Object.keys(cf).filter(k=>cf[k]&&cf[k].trim());
-  if(active.length) rows=rows.filter(r=>active.every(k=>String(r.text[k]||'').toLowerCase().includes(cf[k].trim().toLowerCase())));
+  const active=Object.keys(cf).filter(k=>cf[k]&&cf[k].size);
+  if(active.length) rows=rows.filter(r=>active.every(k=>cf[k].has(String(r.text[k]||''))));
   return rows;
 }
 function renderReportsHead(data){
   const thead=document.querySelector('#reports-table thead')||(()=>{const t=document.createElement('thead');document.getElementById('reports-table').prepend(t);return t;})();
-  let h='<tr>'+data.cols.map((c,i)=>'<th'+(data.numCols.has(i)?' class="num"':'')+'>'+c+'</th>').join('')+'</tr>';
-  h+='<tr class="filter-row">'+data.cols.map((c,i)=>'<th style="padding:3px 4px;"><input type="text" data-col="'+i+'" value="'+((reportsState.colFilters[i]||'').replace(/"/g,'&quot;'))+'" placeholder="filter…" style="width:100%;box-sizing:border-box;padding:3px 5px;border:1px solid var(--border);border-radius:4px;font-size:10.5px;font-family:inherit;font-weight:400;"></th>').join('')+'</tr>';
+  let h='<tr>'+data.cols.map((c,i)=>{
+    const active=reportsState.colFilters[i]&&reportsState.colFilters[i].size;
+    return '<th'+(data.numCols.has(i)?' class="num"':'')+'><div class="rpt-th">'
+      +'<span class="rpt-th-label">'+c+'</span>'
+      +'<button type="button" class="rpt-filter-btn'+(active?' active':'')+'" data-col="'+i+'" title="Filter / tick values in this column">▼</button>'
+      +'</div></th>';
+  }).join('')+'</tr>';
   thead.innerHTML=h;
-  thead.querySelectorAll('input[data-col]').forEach(inp=>inp.addEventListener('input',()=>{ reportsState.colFilters[inp.dataset.col]=inp.value; reportsState.page=0; renderReportsBody(); }));
+  thead.querySelectorAll('.rpt-filter-btn').forEach(btn=>btn.addEventListener('click',e=>{ e.stopPropagation(); openReportsColPopover(parseInt(btn.dataset.col,10),data,btn); }));
   reportsState.headType=reportsState.type;
 }
+// ===== Per-column checkbox filter popover (reports) =====
+let rptPop=null;
+function ensureRptPop(){
+  if(rptPop) return rptPop;
+  const st=document.createElement('style');
+  st.textContent='.rpt-th{display:flex;align-items:center;gap:6px;justify-content:space-between;}'
+    +'.rpt-filter-btn{border:none;background:rgba(255,255,255,.18);color:#fff;cursor:pointer;font-size:8px;line-height:1;padding:3px 5px;border-radius:3px;opacity:.85;flex:0 0 auto;}'
+    +'.rpt-filter-btn:hover{opacity:1;background:rgba(255,255,255,.35);}'
+    +'.rpt-filter-btn.active{background:#F2B705;color:#1f2937;opacity:1;}';
+  document.head.appendChild(st);
+  rptPop=document.createElement('div');
+  rptPop.className='filter-popover hidden';
+  rptPop.innerHTML='<input type="text" class="popover-search" placeholder="Search values…" />'
+    +'<div class="popover-toolbar"><span class="match-count"></span><span><a class="select-all">Select all</a> · <a class="select-none">None</a></span></div>'
+    +'<div class="popover-list"></div>'
+    +'<div class="popover-actions"><button class="popover-clear">Clear</button><button class="popover-done">Done</button></div>';
+  document.body.appendChild(rptPop);
+  return rptPop;
+}
+function closeRptPop(){ if(rptPop) rptPop.classList.add('hidden'); }
+function openReportsColPopover(col,data,triggerEl){
+  const pop=ensureRptPop();
+  const wasOpen=!pop.classList.contains('hidden')&&pop.dataset.col===String(col);
+  closeRptPop(); if(wasOpen) return;
+  pop.dataset.col=String(col);
+  const counts=new Map();
+  for(const r of data.rows){ const v=String(r.text[col]||''); counts.set(v,(counts.get(v)||0)+1); }
+  const values=[...counts.entries()].sort((a,b)=>a[0].localeCompare(b[0],undefined,{numeric:true}));
+  if(!reportsState.colFilters[col]) reportsState.colFilters[col]=new Set();
+  const sel=reportsState.colFilters[col];
+  function renderList(query){
+    const qq=(query||'').toLowerCase().trim();
+    const matched=qq?values.filter(e=>e[0].toLowerCase().includes(qq)):values;
+    pop.querySelector('.match-count').textContent=matched.length.toLocaleString()+' value'+(matched.length===1?'':'s');
+    let hh='';
+    for(const [v,c] of matched.slice(0,500)){
+      const safeV=String(v).replace(/"/g,'&quot;').replace(/</g,'&lt;');
+      const disp=(v===''?'(blank)':String(v).replace(/</g,'&lt;'));
+      const ck=sel.has(v)?'checked':'';
+      hh+='<label class="popover-item"><input type="checkbox" value="'+safeV+'" '+ck+'/><span class="v-text" title="'+disp+'">'+disp+'</span><span class="v-count">'+c.toLocaleString()+'</span></label>';
+    }
+    if(matched.length===0) hh='<div class="popover-truncated">No values match</div>';
+    pop.querySelector('.popover-list').innerHTML=hh;
+  }
+  function apply(){
+    const ns=new Set(), visible=new Set();
+    pop.querySelectorAll('.popover-list input[type=checkbox]').forEach(cb=>{ visible.add(cb.value); if(cb.checked) ns.add(cb.value); });
+    for(const v of sel) if(!visible.has(v)) ns.add(v);
+    reportsState.colFilters[col]=ns; reportsState.page=0;
+    renderReportsHead(getReportData(reportsState.type)); renderReportsBody();
+  }
+  pop.querySelector('.popover-search').value='';
+  pop.querySelector('.popover-search').oninput=e=>renderList(e.target.value);
+  pop.querySelector('.select-all').onclick=e=>{ e.preventDefault(); pop.querySelectorAll('.popover-list input[type=checkbox]').forEach(cb=>cb.checked=true); apply(); };
+  pop.querySelector('.select-none').onclick=e=>{ e.preventDefault(); pop.querySelectorAll('.popover-list input[type=checkbox]').forEach(cb=>cb.checked=false); apply(); };
+  pop.querySelector('.popover-clear').onclick=()=>{ reportsState.colFilters[col]=new Set(); closeRptPop(); reportsState.page=0; renderReportsHead(getReportData(reportsState.type)); renderReportsBody(); };
+  pop.querySelector('.popover-done').onclick=()=>closeRptPop();
+  pop.querySelector('.popover-list').onchange=e=>{ if(e.target&&e.target.matches('input[type=checkbox]')) apply(); };
+  renderList('');
+  const rect=triggerEl.getBoundingClientRect();
+  let left=rect.left; const popW=280,margin=10;
+  if(left+popW>window.innerWidth-margin) left=Math.max(margin,window.innerWidth-popW-margin);
+  let top=rect.bottom+4; const estH=Math.min(window.innerHeight*0.7,420);
+  if(top+estH>window.innerHeight-margin){ const at=rect.top-estH-4; top=at>=margin?at:Math.max(margin,window.innerHeight-estH-margin); }
+  pop.style.top=top+'px'; pop.style.left=left+'px'; pop.classList.remove('hidden');
+  setTimeout(()=>{ const s=pop.querySelector('.popover-search'); if(s) s.focus(); },50);
+}
+document.addEventListener('click',e=>{ if(rptPop && !e.target.closest('.filter-popover') && !e.target.closest('.rpt-filter-btn')) closeRptPop(); });
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeRptPop(); });
+document.addEventListener('scroll',e=>{ if(e.target&&e.target.closest&&e.target.closest('.filter-popover')) return; closeRptPop(); },true);
+window.addEventListener('resize',closeRptPop);
 function renderReportsBody(){
   const type=reportsState.type, def=REPORT_DEFS[type], data=getReportData(type);
   const rows=_filterRows(data);
