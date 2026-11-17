@@ -7747,6 +7747,7 @@ function getReportData(type){
 const BBM_REM_KEY='bbmReportRemarks';
 const BBM_SYNC_URL='https://script.google.com/macros/s/AKfycbyLIpRCLBc5RNrqzoxbEpX2KF33ObiDwDf7RNvcp42Sp_nh2I4AIuRgm_3D-MUVErw2/exec'; /* Google Apps Script Web App — BBM Remarks cross-device sync */
 let BBM_REMOTE=null;    /* in-memory cache of remote remarks {type:{sku:remark}} */
+let _bbmTimer=null;     /* debounce timer for auto-save to the sheet */
 function _bbmAll(){ try{return JSON.parse(localStorage.getItem(BBM_REM_KEY)||'{}');}catch(e){return {};} }
 function getBBMRemark(type,sku){
   if(BBM_REMOTE && BBM_REMOTE[type] && BBM_REMOTE[type][sku]!=null) return BBM_REMOTE[type][sku];
@@ -7947,8 +7948,16 @@ function ensureReportsRendered(){
     pg.querySelector('.next').addEventListener('click', ()=>{ reportsState.page++; renderReportsBody(); });
     pg.querySelector('.page-size').addEventListener('change', e=>{ reportsState.pageSize=parseInt(e.target.value,10); reportsState.page=0; renderReportsBody(); });
     const tbl=document.getElementById('reports-table');
-    tbl.addEventListener('input', e=>{ const el=e.target.closest&&e.target.closest('.bbm-rem'); if(el) setBBMRemarkLocal(el.dataset.type, el.dataset.sku, el.textContent.trim()); });
-    tbl.addEventListener('blur', e=>{ const el=e.target&&e.target.closest&&e.target.closest('.bbm-rem'); if(el) setBBMRemark(el.dataset.type, el.dataset.sku, el.textContent.trim()); }, true);
+    tbl.addEventListener('input', e=>{ const el=e.target.closest&&e.target.closest('.bbm-rem'); if(!el) return;
+      const type=el.dataset.type, sku=el.dataset.sku, val=el.textContent.trim();
+      setBBMRemarkLocal(type,sku,val);
+      if(_bbmTimer) clearTimeout(_bbmTimer);
+      _bbmTimer=setTimeout(function(){ _bbmTimer=null; setBBMRemark(type,sku,val); }, 700);  /* auto-save to sheet shortly after typing stops */
+    });
+    tbl.addEventListener('blur', e=>{ const el=e.target&&e.target.closest&&e.target.closest('.bbm-rem'); if(!el) return;
+      if(_bbmTimer){ clearTimeout(_bbmTimer); _bbmTimer=null; }
+      setBBMRemark(el.dataset.type, el.dataset.sku, el.textContent.trim());
+    }, true);
     tbl.addEventListener('keydown', e=>{ if(e.key==='Enter' && e.target.closest && e.target.closest('.bbm-rem')){ e.preventDefault(); e.target.blur(); } });
     bbmLoadRemote(function(ok){ if(ok && !_bbmEditing()) renderReportsBody(); });
   }
