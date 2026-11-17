@@ -7752,11 +7752,15 @@ function getBBMRemark(type,sku){
   if(BBM_REMOTE && BBM_REMOTE[type] && BBM_REMOTE[type][sku]!=null) return BBM_REMOTE[type][sku];
   const a=_bbmAll(); return (a[type]&&a[type][sku])?a[type][sku]:'';
 }
-function setBBMRemark(type,sku,val){
+function setBBMRemarkLocal(type,sku,val){
   const a=_bbmAll(); (a[type]=a[type]||{})[sku]=val; try{localStorage.setItem(BBM_REM_KEY,JSON.stringify(a));}catch(e){}
   if(BBM_REMOTE){ (BBM_REMOTE[type]=BBM_REMOTE[type]||{})[sku]=val; }
+}
+function setBBMRemark(type,sku,val){
+  setBBMRemarkLocal(type,sku,val);
   if(BBM_SYNC_URL){ try{ fetch(BBM_SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({type:type,sku:sku,remark:val})}).catch(function(){}); }catch(e){} }
 }
+function _bbmEditing(){ const a=document.activeElement; return !!(a && a.classList && a.classList.contains('bbm-rem')); }
 function bbmLoadRemote(cb){
   if(!BBM_SYNC_URL){ if(cb)cb(false); return; }
   try{ fetch(BBM_SYNC_URL,{method:'GET'}).then(function(r){return r.json();}).then(function(j){ BBM_REMOTE=j||{}; if(cb)cb(true); }).catch(function(){ if(cb)cb(false); }); }
@@ -7943,9 +7947,10 @@ function ensureReportsRendered(){
     pg.querySelector('.next').addEventListener('click', ()=>{ reportsState.page++; renderReportsBody(); });
     pg.querySelector('.page-size').addEventListener('change', e=>{ reportsState.pageSize=parseInt(e.target.value,10); reportsState.page=0; renderReportsBody(); });
     const tbl=document.getElementById('reports-table');
-    tbl.addEventListener('input', e=>{ const el=e.target.closest&&e.target.closest('.bbm-rem'); if(el) setBBMRemark(el.dataset.type, el.dataset.sku, el.textContent.trim()); });
+    tbl.addEventListener('input', e=>{ const el=e.target.closest&&e.target.closest('.bbm-rem'); if(el) setBBMRemarkLocal(el.dataset.type, el.dataset.sku, el.textContent.trim()); });
+    tbl.addEventListener('blur', e=>{ const el=e.target&&e.target.closest&&e.target.closest('.bbm-rem'); if(el) setBBMRemark(el.dataset.type, el.dataset.sku, el.textContent.trim()); }, true);
     tbl.addEventListener('keydown', e=>{ if(e.key==='Enter' && e.target.closest && e.target.closest('.bbm-rem')){ e.preventDefault(); e.target.blur(); } });
-    bbmLoadRemote(function(ok){ if(ok) renderReportsBody(); });
+    bbmLoadRemote(function(ok){ if(ok && !_bbmEditing()) renderReportsBody(); });
   }
   renderReports();
 }
