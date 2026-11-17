@@ -7745,9 +7745,23 @@ function getReportData(type){
 }
 // ===== Editable BBM Remarks (persist locally per viewer, keyed by SKU) =====
 const BBM_REM_KEY='bbmReportRemarks';
+const BBM_SYNC_URL='https://script.google.com/macros/s/AKfycbyLIpRCLBc5RNrqzoxbEpX2KF33ObiDwDf7RNvcp42Sp_nh2I4AIuRgm_3D-MUVErw2/exec'; /* Google Apps Script Web App — BBM Remarks cross-device sync */
+let BBM_REMOTE=null;    /* in-memory cache of remote remarks {type:{sku:remark}} */
 function _bbmAll(){ try{return JSON.parse(localStorage.getItem(BBM_REM_KEY)||'{}');}catch(e){return {};} }
-function getBBMRemark(type,sku){ const a=_bbmAll(); return (a[type]&&a[type][sku])?a[type][sku]:''; }
-function setBBMRemark(type,sku,val){ const a=_bbmAll(); (a[type]=a[type]||{})[sku]=val; try{localStorage.setItem(BBM_REM_KEY,JSON.stringify(a));}catch(e){} }
+function getBBMRemark(type,sku){
+  if(BBM_REMOTE && BBM_REMOTE[type] && BBM_REMOTE[type][sku]!=null) return BBM_REMOTE[type][sku];
+  const a=_bbmAll(); return (a[type]&&a[type][sku])?a[type][sku]:'';
+}
+function setBBMRemark(type,sku,val){
+  const a=_bbmAll(); (a[type]=a[type]||{})[sku]=val; try{localStorage.setItem(BBM_REM_KEY,JSON.stringify(a));}catch(e){}
+  if(BBM_REMOTE){ (BBM_REMOTE[type]=BBM_REMOTE[type]||{})[sku]=val; }
+  if(BBM_SYNC_URL){ try{ fetch(BBM_SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({type:type,sku:sku,remark:val})}).catch(function(){}); }catch(e){} }
+}
+function bbmLoadRemote(cb){
+  if(!BBM_SYNC_URL){ if(cb)cb(false); return; }
+  try{ fetch(BBM_SYNC_URL,{method:'GET'}).then(function(r){return r.json();}).then(function(j){ BBM_REMOTE=j||{}; if(cb)cb(true); }).catch(function(){ if(cb)cb(false); }); }
+  catch(e){ if(cb)cb(false); }
+}
 function _filterRows(data){
   let rows=data.rows;
   const q=reportsState.search.trim().toLowerCase();
@@ -7931,6 +7945,7 @@ function ensureReportsRendered(){
     const tbl=document.getElementById('reports-table');
     tbl.addEventListener('input', e=>{ const el=e.target.closest&&e.target.closest('.bbm-rem'); if(el) setBBMRemark(el.dataset.type, el.dataset.sku, el.textContent.trim()); });
     tbl.addEventListener('keydown', e=>{ if(e.key==='Enter' && e.target.closest && e.target.closest('.bbm-rem')){ e.preventDefault(); e.target.blur(); } });
+    bbmLoadRemote(function(ok){ if(ok) renderReportsBody(); });
   }
   renderReports();
 }
